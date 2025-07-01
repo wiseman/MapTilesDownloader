@@ -178,3 +178,12 @@ hr {
 	overflow-wrap: normal;
 	overflow-x: scroll;
 }
+
+/* Filename preview shown under the main title when hovering over grid squares */
+#tile-info {
+	font-size: 14px;
+	font-weight: 400;
+	color: #ffffff;
+	display: inline-block;
+	letter-spacing: 0.5px;
+}

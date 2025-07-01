@@ -44,7 +44,7 @@ $(function() {
 
 	function initializeMap() {
 
-		mapboxgl.accessToken = 'pk.eyJ1IjoiYWxpYXNocmFmIiwiYSI6ImNqdXl5MHV5YTAzNXI0NG51OWFuMGp4enQifQ.zpd2gZFwBTRqiapp1yci9g';
+		mapboxgl.accessToken = 'pk.eyJ1Ijoid2lzZW1hbiIsImEiOiJHbzAtOHgwIn0.Pj1Nx77LS1-ujzRKJVOttA';
 
 		map = new mapboxgl.Map({
 			container: 'map-view',
@@ -55,6 +55,9 @@ $(function() {
 
 		geocoder = new MapboxGeocoder({ accessToken: mapboxgl.accessToken });
 		var control = map.addControl(geocoder);
+
+		// Display output filename while hovering over a grid square in preview mode
+		map.on('mousemove', handleMouseMove);
 	}
 
 	function initializeMaterialize() {
@@ -304,9 +307,16 @@ $(function() {
 
 	function removeGrid() {
 		removeLayer("grid-preview");
+		$("#tile-info").text("");
 	}
 
 	function previewGrid() {
+
+		// Guard: ensure a region is selected before previewing the grid
+		if(draw.getAll().features.length === 0) {
+			M.toast({html: 'You need to select a region first.', displayLength: 3000});
+			return;
+		}
 
 		var maxZoom = getMaxZoom();
 		var grid = getGrid(maxZoom);
@@ -336,7 +346,35 @@ $(function() {
 		});
 
 		var totalTiles = getAllGridTiles().length;
-		M.toast({html: 'Total ' + totalTiles.toLocaleString() + ' tiles in the region.', displayLength: 5000})
+
+		// Estimate disk usage at 155 KB per tile
+		var estimatedKB = totalTiles * 155;
+
+		function humanReadableSize(kb) {
+			var size = kb;
+			var unit = " KB";
+			if(size >= 1024) {
+				size = size / 1024; // to MB
+				unit = " MB";
+				if(size >= 1024) {
+					size = size / 1024; // to GB
+					unit = " GB";
+					if(size >= 1024) {
+						size = size / 1024; // to TB
+						unit = " TB";
+					}
+				}
+			}
+			// Keep one decimal place, but strip trailing .0
+			var str = size.toFixed(1);
+			if(/\.0$/.test(str)) {
+				str = parseInt(str);
+			}
+			return str.toLocaleString() + unit;
+		}
+
+		var estimatedSizeString = humanReadableSize(estimatedKB);
+		M.toast({html: 'Total ' + totalTiles.toLocaleString() + ' tiles (~' + estimatedSizeString + ') in the region.', displayLength: 5000})
 
 	}
 
@@ -615,6 +653,65 @@ $(function() {
 		removeGrid();
 		clearLogs();
 
+	}
+
+	// Build the final output path for a given tile x, y, z using the current
+	// values from the "More Options" section (directory / filename templates)
+	function buildOutputPath(x, y, z) {
+		var outputDirectory = $("#output-directory-box").val();
+		var outputFile = $("#output-file-box").val();
+
+		// Ensure we have some directory text – fallback to empty string
+		if(!outputDirectory) {
+			outputDirectory = "";
+		}
+
+		var quad = generateQuadKey(x, y, z);
+
+		var path = (outputDirectory ? outputDirectory + "/" : "") + outputFile;
+
+		var replacements = {
+			"{x}": x,
+			"{y}": y,
+			"{z}": z,
+			"{quad}": quad
+		};
+
+		for (var key in replacements) {
+			path = path.split(key).join(replacements[key]);
+		}
+
+		return path;
+	}
+
+	// Mouse-move handler to update filename preview under the main title
+	function handleMouseMove(e) {
+		// We only want to react when the user has previewed the grid
+		if(map.getLayer("grid-preview") == null) {
+			$("#tile-info").text("");
+			return;
+		}
+
+		// Guard: ensure draw is initialised and a selection exists
+		if(!draw || draw.getAll().features.length === 0) {
+			$("#tile-info").text("");
+			return;
+		}
+
+		// Check if the mouse is inside the selected polygon
+		var point = turf.point([e.lngLat.lng, e.lngLat.lat]);
+		var selectionPolygon = draw.getAll().features[0];
+		if(turf.booleanPointInPolygon(point, selectionPolygon) === false) {
+			$("#tile-info").text("");
+			return;
+		}
+
+		var z = getMaxZoom();
+		var x = long2tile(e.lngLat.lng, z);
+		var y = lat2tile(e.lngLat.lat, z);
+
+		var path = buildOutputPath(x, y, z);
+		$("#tile-info").text(path);
 	}
 
 	initializeMaterialize();
