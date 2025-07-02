@@ -8,13 +8,15 @@ html, body {
 
 #max-height {
 	height: 100%;
-	width: calc(100% - 302px);
+	/* 20% wider sidebar (408px) means map container is narrower */
+	width: calc(100% - 370px);
 	display: inline-block;
 	position: relative;
 }
 
 .sidebar {
-	width: 340px;
+	/* 20% wider than original 340px */
+	width: 408px;
 	height: calc(100% - 120px);
 	height: 100%;
 	position: absolute;

@@ -121,6 +121,33 @@ $(function() {
 
 	}
 
+	// Initialise zoom-set buttons to jump map to desired zoom level
+	function initializeZoomButtons() {
+		$("#zoom-from-set").click(function() {
+			var z = parseInt($("#zoom-from-box").val());
+			if(!isNaN(z)) {
+				map.setZoom(z);
+			}
+		});
+		$("#zoom-to-set").click(function() {
+			var z = parseInt($("#zoom-to-box").val());
+			if(!isNaN(z)) {
+				map.setZoom(z);
+			}
+		});
+	}
+
+	// Open current map view in Google Maps aerial view (satellite)
+	function initializeOpenInGoogle() {
+		$("#open-gmaps-button").click(function() {
+			var center = map.getCenter();
+			var zoom = Math.round(map.getZoom());
+			// Google Maps Maps URLs API (satellite basemap)
+			var url = `https://www.google.com/maps/@?api=1&map_action=map&basemap=satellite&center=${center.lat.toFixed(6)},${center.lng.toFixed(6)}&zoom=${zoom}`;
+			window.open(url, "_blank");
+		});
+	}
+
 	function initializeRectangleTool() {
 		
 		var modes = MapboxDraw.modes;
@@ -278,14 +305,12 @@ $(function() {
 
 				var rect = getTileRect(x, y, thisZoom);
 
-				if(isTileInSelection(rect)) {
-					rects.push({
-						x: x,
-						y: y,
-						z: thisZoom,
-						rect: rect,
-					});
-				}
+				rects.push({
+					x: x,
+					y: y,
+					z: thisZoom,
+					rect: rect,
+				});
 
 			}
 		}
@@ -310,6 +335,83 @@ $(function() {
 		$("#tile-info").text("");
 	}
 
+	// NEW: quick helpers --------------------------------------------------
+	// Return a human-readable string given a size in kilobytes
+	function humanReadableSize(kb) {
+		var size = kb;
+		var unit = " KB";
+		if(size >= 1024) {
+			size = size / 1024; // → MB
+			unit = " MB";
+			if(size >= 1024) {
+				size = size / 1024; // → GB
+				unit = " GB";
+				if(size >= 1024) {
+					size = size / 1024; // → TB
+					unit = " TB";
+				}
+			}
+		}
+		// Keep one decimal place, strip trailing .0
+		var str = size.toFixed(1);
+		if(/\.0$/.test(str)) {
+			str = parseInt(str);
+		}
+		return str.toLocaleString() + unit;
+	}
+
+	// Quickly estimate the total number of tiles across all zoom levels
+	// WITHOUT generating the full grid (fast and safe)
+	function estimateTileCount() {
+		var bounds = getBounds();
+		var minZ   = getMinZoom();
+		var maxZ   = getMaxZoom();
+		var total  = 0;
+
+		for(var z = minZ; z <= maxZ; z++) {
+			var TY = lat2tile(bounds.getNorthEast().lat, z);
+			var LX = long2tile(bounds.getSouthWest().lng, z);
+			var BY = lat2tile(bounds.getSouthWest().lat, z);
+			var RX = long2tile(bounds.getNorthEast().lng, z);
+			total += (BY - TY + 1) * (RX - LX + 1);
+		}
+		return total;
+	}
+	// ---------------------------------------------------------------------
+
+	// Preview optimisation -------------------------------------------------
+	const PREVIEW_Z_LIMIT = 20; // do not render grids finer than z 20
+
+	// Build a single MultiLineString GeoJSON feature covering the grid lines
+	function buildGridLines(bounds, zoom) {
+		const TY = lat2tile(bounds.getNorthEast().lat,  zoom);
+		const LX = long2tile(bounds.getSouthWest().lng, zoom);
+		const BY = lat2tile(bounds.getSouthWest().lat,  zoom);
+		const RX = long2tile(bounds.getNorthEast().lng, zoom);
+
+		const lines = [];
+		// Vertical grid lines (every x)
+		for(let x = LX; x <= RX + 1; x++) {
+			lines.push([
+				[ tile2long(x, zoom), tile2lat(TY, zoom) ],
+				[ tile2long(x, zoom), tile2lat(BY+1, zoom) ]
+			]);
+		}
+		// Horizontal grid lines (every y)
+		for(let y = TY; y <= BY + 1; y++) {
+			lines.push([
+				[ tile2long(LX, zoom),     tile2lat(y, zoom) ],
+				[ tile2long(RX+1, zoom),   tile2lat(y, zoom) ]
+			]);
+		}
+
+		return {
+			type: "Feature",
+			geometry: { type: "MultiLineString", coordinates: lines }
+		};
+	}
+	// ---------------------------------------------------------------------
+
 	function previewGrid() {
 
 		// Guard: ensure a region is selected before previewing the grid
@@ -318,64 +420,29 @@ $(function() {
 			return;
 		}
 
-		var maxZoom = getMaxZoom();
-		var grid = getGrid(maxZoom);
+		// 1. Show a quick estimate before heavy grid generation -------------
+		var totalTiles = estimateTileCount();
+		var estimatedKB = totalTiles * 155; // 155 KB per tile heuristic
+		var estimatedSizeString = humanReadableSize(estimatedKB);
+		M.toast({html: 'Total ' + totalTiles.toLocaleString() + ' tiles (~' + estimatedSizeString + ') in the region.', displayLength: 5000});
+		// ------------------------------------------------------------------
 
-		var pointsCollection = []
-
-		for(var i in grid) {
-			var feature = grid[i];
-			var array = getArrayByBounds(feature.rect);
-			pointsCollection.push(array);
-		}
+		// Build lightweight grid preview using lines instead of polygons
+		var previewZoom = Math.min(getMaxZoom(), PREVIEW_Z_LIMIT);
+		var bounds = getBounds();
+		var gridLines = buildGridLines(bounds, previewZoom);
 
 		removeGrid();
 
 		map.addLayer({
-			'id': "grid-preview",
-			'type': 'line',
-			'source': {
-				'type': 'geojson',
-				'data': turf.polygon(pointsCollection),
-			},
-			'layout': {},
-			'paint': {
-				"line-color": "#fa8231",
-				"line-width": 3,
-			}
+			id: "grid-preview",
+			type: "line",
+			source: { type: "geojson", data: gridLines },
+			layout: {},
+			paint: { "line-color": "#fa8231", "line-width": 2 }
 		});
 
-		var totalTiles = getAllGridTiles().length;
-
-		// Estimate disk usage at 155 KB per tile
-		var estimatedKB = totalTiles * 155;
-
-		function humanReadableSize(kb) {
-			var size = kb;
-			var unit = " KB";
-			if(size >= 1024) {
-				size = size / 1024; // to MB
-				unit = " MB";
-				if(size >= 1024) {
-					size = size / 1024; // to GB
-					unit = " GB";
-					if(size >= 1024) {
-						size = size / 1024; // to TB
-						unit = " TB";
-					}
-				}
-			}
-			// Keep one decimal place, but strip trailing .0
-			var str = size.toFixed(1);
-			if(/\.0$/.test(str)) {
-				str = parseInt(str);
-			}
-			return str.toLocaleString() + unit;
-		}
-
-		var estimatedSizeString = humanReadableSize(estimatedKB);
-		M.toast({html: 'Total ' + totalTiles.toLocaleString() + ' tiles (~' + estimatedSizeString + ') in the region.', displayLength: 5000})
-
+		// Tiles & size already shown earlier – no need to repeat here
 	}
 
 	function previewRect(rectInfo) {
@@ -721,5 +788,7 @@ $(function() {
 	initializeRectangleTool();
 	initializeGridPreview();
 	initializeMoreOptions();
+	initializeZoomButtons();
+	initializeOpenInGoogle();
 	initializeDownloader();
 });
