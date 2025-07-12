@@ -10,6 +10,15 @@ $(function() {
 	var cancellationToken = null;
 	var requests = [];
 
+	var basemapStyles = {
+		"Custom Style": "mapbox://styles/aliashraf/ck6lw9nr80lvo1ipj8zovttdx",
+		"Mapbox Streets": "mapbox://styles/mapbox/streets-v11",
+		"Mapbox Satellite": "mapbox://styles/mapbox/satellite-v9",
+		"Mapbox Light": "mapbox://styles/mapbox/light-v10",
+		"Mapbox Dark": "mapbox://styles/mapbox/dark-v10",
+		"Mapbox Outdoors": "mapbox://styles/mapbox/outdoors-v11"
+	};
+
 	var sources = {
 
 		"Bing Maps": "http://ecn.t0.tiles.virtualearth.net/tiles/r{quad}.jpeg?g=129&mkt=en&stl=H",
@@ -46,9 +55,11 @@ $(function() {
 
 		mapboxgl.accessToken = 'pk.eyJ1Ijoid2lzZW1hbiIsImEiOiJHbzAtOHgwIn0.Pj1Nx77LS1-ujzRKJVOttA';
 
+		var initialStyle = $("#basemap-style-box").val() || basemapStyles["Custom Style"];
+
 		map = new mapboxgl.Map({
 			container: 'map-view',
-			style: 'mapbox://styles/aliashraf/ck6lw9nr80lvo1ipj8zovttdx',
+			style: initialStyle,
 			center: [-73.983652, 40.755024], 
 			zoom: 12
 		});
@@ -65,6 +76,10 @@ $(function() {
 		$('.dropdown-trigger').dropdown({
 			constrainWidth: false,
 		});
+		// Ensure input labels stay floating when default values are present
+		if(window.M && M.updateTextFields){
+			M.updateTextFields();
+		}
 	}
 
 	function initializeSources() {
@@ -781,8 +796,27 @@ $(function() {
 		$("#tile-info").text(path);
 	}
 
+	function initializeBasemapStyles() {
+		var dropdown = $("#basemap-style-list");
+		for(var key in basemapStyles) {
+			var styleUrl = basemapStyles[key];
+			var item = $("<li><a></a></li>");
+			item.attr("data-style", styleUrl);
+			item.find("a").text(key);
+			item.click(function() {
+				var styleUrl = $(this).attr("data-style");
+				$("#basemap-style-box").val(styleUrl);
+				if(map) {
+					map.setStyle(styleUrl);
+				}
+			});
+			dropdown.append(item);
+		}
+	}
+
 	initializeMaterialize();
 	initializeSources();
+	initializeBasemapStyles();
 	initializeMap();
 	initializeSearch();
 	initializeRectangleTool();
